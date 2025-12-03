@@ -52,6 +52,17 @@ if ($method === 'GET') {
         $stmt = $conn->prepare("SELECT * FROM exam_results WHERE student_id = ?");
         $stmt->execute([$student_id]);
         echo json_encode($stmt->fetchAll(PDO::FETCH_ASSOC));
+    } elseif ($path === 'exam_results') {
+        $exam_id = $_GET['id'];
+        $stmt = $conn->prepare("
+            SELECT u.full_name, u.email, u.class, er.marks_obtained, er.submitted_at 
+            FROM exam_results er 
+            JOIN users u ON er.student_id = u.id 
+            WHERE er.exam_id = ?
+            ORDER BY er.marks_obtained DESC
+        ");
+        $stmt->execute([$exam_id]);
+        echo json_encode($stmt->fetchAll(PDO::FETCH_ASSOC));
     } elseif ($path === 'analytics') {
         // Dashboard Overview Stats
         $stats = [];
@@ -123,6 +134,38 @@ if ($method === 'GET') {
         } catch (Exception $e) {
             $conn->rollBack();
             echo json_encode(["status" => "error", "message" => "Failed to create exam: " . $e->getMessage()]);
+        }
+    } elseif ($path === 'delete_exam') {
+        $id = $data['id'];
+        $stmt = $conn->prepare("DELETE FROM exams WHERE id = ?");
+        if ($stmt->execute([$id])) {
+            echo json_encode(["status" => "success", "message" => "Exam deleted"]);
+        } else {
+            echo json_encode(["status" => "error", "message" => "Failed to delete exam"]);
+        }
+    } elseif ($path === 'update_exam') {
+        $conn->beginTransaction();
+        try {
+            $stmt = $conn->prepare("UPDATE exams SET name = ?, description = ?, class = ?, total_marks = ?, start_time = ?, end_time = ?, duration_minutes = ? WHERE id = ?");
+            $stmt->execute([$data['name'], $data['description'], $data['class'], $data['total_marks'], $data['start_time'], $data['end_time'], $data['duration_minutes'], $data['id']]);
+
+            // Delete old questions
+            $stmt = $conn->prepare("DELETE FROM exam_questions WHERE exam_id = ?");
+            $stmt->execute([$data['id']]);
+
+            // Insert new questions
+            if (isset($data['questions']) && is_array($data['questions'])) {
+                $qStmt = $conn->prepare("INSERT INTO exam_questions (exam_id, question_text, options, correct_answer, marks) VALUES (?, ?, ?, ?, ?)");
+                foreach ($data['questions'] as $q) {
+                    $qStmt->execute([$data['id'], $q['question_text'], is_string($q['options']) ? $q['options'] : json_encode($q['options']), $q['correct_answer'], $q['marks']]);
+                }
+            }
+
+            $conn->commit();
+            echo json_encode(["status" => "success", "message" => "Exam updated"]);
+        } catch (Exception $e) {
+            $conn->rollBack();
+            echo json_encode(["status" => "error", "message" => "Failed to update exam: " . $e->getMessage()]);
         }
     } elseif ($path === 'delete_student') {
         $id = $data['id'];
